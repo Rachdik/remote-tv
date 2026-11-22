@@ -6,13 +6,13 @@ Two artifacts are produced:
 
 | File | Use |
 | --- | --- |
-| `dist/UniversalTVRemote-1.0.4-release.apk` | Signed release build. Use this on a phone. |
-| `dist/UniversalTVRemote-1.0.4-debug.apk` | Debug build with `-debug` suffix, installs side by side. |
+| `dist/UniversalTVRemote-1.0.5-release.apk` | Signed release build. Use this on a phone. |
+| `dist/UniversalTVRemote-1.0.5-debug.apk` | Debug build with `-debug` suffix, installs side by side. |
 
 Install over USB:
 
 ```bash
-adb install -r dist/UniversalTVRemote-1.0.4-release.apk
+adb install -r dist/UniversalTVRemote-1.0.5-release.apk
 ```
 
 Or copy the APK to the phone and open it (allow "install unknown apps" for the file manager).
@@ -156,3 +156,12 @@ pairing channel). The control service completes the TLS handshake — which is w
 are now `Ports.CONTROL = 6466` / `Ports.PAIRING = 6467`, stored devices from older builds are
 migrated, and pairing never falls back to the control port. Devices paired with an earlier build
 have to be forgotten and paired again.
+
+Version 1.0.5 fixes the session that closed right after connecting (`The TV closed the connection`
+with `TV reported an error (value=true)`). The control channel is TV-driven: the TV sends
+`remote_configure` first and only accepts commands after `remote_start`. Older builds announced
+themselves as soon as TLS was up and reported "connected" before the TV was ready, which the TV
+answers with `remote_error` and a hang-up. The client now waits for the TV, answers its configure
+exactly once, and waits for `remote_start` before showing the remote as usable. The TV's error is
+also decoded: it echoes the refused message, so the app can say *The TV rejected …* instead of a
+bare flag. Nothing has to be re-paired for this update.

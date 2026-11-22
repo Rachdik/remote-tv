@@ -113,7 +113,7 @@ data class TextFieldInfo(val fieldCounter: Int, val value: String, val focused: 
 object RemoteMessages {
 
     private const val CLIENT_PACKAGE = "com.universalremote.tv"
-    private const val CLIENT_VERSION = "1.0.4"
+    private const val CLIENT_VERSION = "1.0.5"
 
     /** `RemoteConfigure` with this client's feature mask and device information. */
     fun configure(code1: Int = Feature.REQUESTED): ByteArray =
@@ -207,7 +207,58 @@ object RemoteMessages {
         data class ImeShowRequest(val fieldCounter: Int, val value: String) : Event
         data class ImeBatchEdit(val imeCounter: Int, val fieldCounter: Int) : Event
         data class VoiceBegin(val sessionId: Int) : Event
-        data class TvError(val message: String) : Event
+
+        /**
+         * `RemoteError`. The TV echoes the message it refused in its `message` field, so
+         * [rejected] names it (e.g. `remote_key_inject (DPAD_CENTER)`) when the TV provided it.
+         */
+        data class TvError(val value: Boolean, val rejected: String?) : Event {
+            val message: String
+                get() = if (rejected != null) {
+                    "The TV rejected $rejected."
+                } else {
+                    "The TV reported an error (value=$value)."
+                }
+        }
+    }
+
+    /** Names the message a `RemoteError` echoes back, so a rejection is identifiable. */
+    private fun describeEcho(payload: ByteArray): String? {
+        val reader = ProtoReader(payload)
+        while (true) {
+            val field = reader.nextField() ?: return null
+            if (field.number == RemoteField.KEY_INJECT) {
+                val sub = reader.readMessage()
+                var key: TvKey? = null
+                while (true) {
+                    val f = sub.nextField() ?: break
+                    if (f.number == 1) {
+                        val code = sub.readInt()
+                        key = TvKey.values().firstOrNull { it.code == code }
+                    } else {
+                        sub.skip(f.wireType)
+                    }
+                }
+                return if (key != null) "remote_key_inject (${key.name})" else "remote_key_inject"
+            }
+            val name = when (field.number) {
+                RemoteField.CONFIGURE -> "remote_configure"
+                RemoteField.SET_ACTIVE -> "remote_set_active"
+                RemoteField.ERROR -> "remote_error"
+                RemoteField.IME_BATCH_EDIT -> "remote_ime_batch_edit"
+                RemoteField.IME_SHOW_REQUEST -> "remote_ime_show_request"
+                RemoteField.VOICE_BEGIN -> "remote_voice_begin"
+                RemoteField.VOICE_PAYLOAD -> "remote_voice_payload"
+                RemoteField.VOICE_END -> "remote_voice_end"
+                RemoteField.START -> "remote_start"
+                RemoteField.SET_VOLUME_LEVEL -> "remote_set_volume_level"
+                RemoteField.ADJUST_VOLUME_LEVEL -> "remote_adjust_volume_level"
+                RemoteField.APP_LINK_LAUNCH_REQUEST -> "remote_app_link_launch_request"
+                else -> null
+            }
+            if (name != null) return name
+            reader.skip(field.wireType)
+        }
     }
 
     fun parse(payload: ByteArray): List<Event> {
@@ -376,11 +427,17 @@ object RemoteMessages {
                 RemoteField.ERROR -> {
                     val sub = reader.readMessage()
                     var value = false
+                    var rejected: String? = null
                     while (true) {
                         val f = sub.nextField() ?: break
-                        if (f.number == 1) value = sub.readBool() else sub.skip(f.wireType)
+                        when {
+                            f.number == 1 -> value = sub.readBool()
+                            f.number == 2 && f.wireType == ProtoWriter.WIRE_LENGTH_DELIMITED ->
+                                rejected = describeEcho(sub.readBytes())
+                            else -> sub.skip(f.wireType)
+                        }
                     }
-                    events += Event.TvError("TV reported an error (value=$value)")
+                    events += Event.TvError(value, rejected)
                 }
 
                 else -> reader.skip(field.wireType)

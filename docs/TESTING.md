@@ -20,7 +20,7 @@ side of the protocol, and everything that needs a real TV or phone runtime is li
 
 ```
 gradle assembleDebug            → BUILD SUCCESSFUL   app-debug.apk           16 MB
-gradle testDebugUnitTest        → BUILD SUCCESSFUL   13 tests, 0 failures, 0 skipped
+gradle testDebugUnitTest        → BUILD SUCCESSFUL   16 tests, 0 failures, 0 skipped
 gradle assembleRelease          → BUILD SUCCESSFUL   app-release.apk        10 MB (signed, minification off)
 apksigner verify                → Verifies (APK Signature Scheme v2)
 aapt2 dump badging              → minSdkVersion 25, targetSdkVersion 35,
@@ -30,6 +30,10 @@ aapt2 dump badging              → minSdkVersion 25, targetSdkVersion 35,
 Unit and integration tests, all green:
 
 ```
+ClientIdentityRoundTripTest (2)
+  two generated identities are different
+  pkcs12 round trip keeps certificate and private key
+
 ProtocolCodecTest  (10)
   varint encodes and decodes the protobuf reference values
   key inject matches the schema encoding
@@ -42,10 +46,11 @@ ProtocolCodecTest  (10)
   client identity produces a usable self-signed certificate
   pairing code check digits are verified against the certificate
 
-FakeTvServerTest   (3)
+FakeTvServerTest   (4)
   pairs with the on screen code and then controls the tv
   rejects a pairing code that does not match the tv certificate
   control channel negotiates features answers pings and sends commands
+  remote error names the message the tv refused
 ```
 
 ### What `FakeTvServerTest` actually exercises
@@ -60,8 +65,11 @@ implements the Polo handshake, then the control channel.
   six-character hexadecimal encoding negotiation.
 * **Code verification** — a code whose check digits do not match the certificate is rejected
   locally, before any secret is transmitted.
-* **Control handshake** — `RemoteConfigure` both ways, feature mask negotiation (623), and
-  `RemoteSetActive`.
+* **TV-driven control handshake** — the fake TV sends `remote_configure` first, like real
+  firmware; the client answers with the intersected mask (623) **exactly once** (a second or
+  unsolicited configure fails the test), and `remote_start` is what makes the session ready.
+* **RemoteError decoding** — `remote_error { value = true, message { remote_key_inject … } }` is
+  decoded to `The TV rejected remote_key_inject (DPAD_CENTER).` instead of a bare flag.
 * **Keep-alive** — the server sends `remote_ping_request { val1 = 5 }` and asserts the app answers
   with `remote_ping_response { val1 = 5 }`.
 * **Inbound state** — `remote_set_volume_level { max 100, level 42 }` and

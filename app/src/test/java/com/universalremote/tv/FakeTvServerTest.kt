@@ -111,6 +111,10 @@ class FakeTvServerTest {
                 assertEquals(623, tv.negotiatedFeatures)
                 assertEquals(623, session.negotiatedFeatures)
 
+                // Exactly one configure arrives, and only after the TV spoke. Announcing itself
+                // first (or twice) makes real TVs answer with RemoteError and hang up.
+                assertEquals(1, tv.clientConfigures)
+
                 // Keep-alive: the TV sent a ping request and the client answered with the same value.
                 assertEquals(5, withTimeout(5000) { tv.pingAnswered.await() })
 
@@ -175,6 +179,27 @@ class FakeTvServerTest {
         }
     }
 
+    @Test
+    fun `remote error names the message the tv refused`() {
+        val echo = ProtoWriter()
+            .message(RemoteField.KEY_INJECT) {
+                int(1, TvKey.DPAD_CENTER.code, writeDefault = true)
+                int(2, 3, writeDefault = true)
+            }
+            .toByteArray()
+        val frame = ProtoWriter()
+            .message(RemoteField.ERROR) {
+                bool(1, true, writeDefault = true)
+                bytes(2, echo)
+            }
+            .toByteArray()
+
+        val error = RemoteMessages.parse(frame).filterIsInstance<RemoteMessages.Event.TvError>().single()
+        assertTrue(error.value)
+        assertEquals("remote_key_inject (DPAD_CENTER)", error.rejected)
+        assertEquals("The TV rejected remote_key_inject (DPAD_CENTER).", error.message)
+    }
+
     // ---------------------------------------------------------------------------------------
 
     /** Minimal server-side implementation of the TV half of the protocol. */
@@ -203,6 +228,9 @@ class FakeTvServerTest {
 
         @Volatile
         var negotiatedFeatures: Int = -1
+
+        @Volatile
+        var clientConfigures: Int = 0
 
 
         private val threads = mutableListOf<Thread>()
@@ -282,6 +310,20 @@ class FakeTvServerTest {
                     val output = socket.outputStream
                     var handshakeSent = false
 
+                    // A real TV drives the session: it announces its feature mask straight
+                    // after TLS, before the client has said anything.
+                    writeFrame(
+                        output,
+                        ProtoWriter().message(RemoteField.CONFIGURE) {
+                            int(1, 623, writeDefault = true)
+                            message(2) {
+                                string(1, "FakeTV")
+                                string(2, "FakeVendor")
+                                string(6, "1.0")
+                            }
+                        }.toByteArray(),
+                    )
+
                     while (true) {
                         val frame = readFrame(input) ?: break
                         val reader = ProtoReader(frame)
@@ -290,21 +332,11 @@ class FakeTvServerTest {
                             when (field.number) {
                                 RemoteField.CONFIGURE -> {
                                     val mask = readConfigureMask(reader.readMessage())
+                                    clientConfigures++
                                     if (!handshakeSent) {
-                                        // First configure from the client: answer with our features.
+                                        // The client's reply to our configure: negotiated mask.
                                         handshakeSent = true
                                         negotiatedFeatures = mask
-                                        writeFrame(
-                                            output,
-                                            ProtoWriter().message(RemoteField.CONFIGURE) {
-                                                int(1, 623, writeDefault = true)
-                                                message(2) {
-                                                    string(1, "FakeTV")
-                                                    string(2, "FakeVendor")
-                                                    string(6, "1.0")
-                                                }
-                                            }.toByteArray(),
-                                        )
                                         sendPingAndState(output)
                                         handshakeDone.complete(Unit)
                                     } else {

@@ -85,7 +85,7 @@ generated once and reused for every pairing.
 | --- | --- | --- |
 | `remote_configure` | 1 | `{ code1 = feature mask, device_info }` |
 | `remote_set_active` | 2 | `{ active = feature mask }` |
-| `remote_error` | 3 | |
+| `remote_error` | 3 | `{ value, message }` — `message` echoes the refused message |
 | `remote_ping_request` | 8 | TV → phone every ~5 s |
 | `remote_ping_response` | 9 | echoed `val1` |
 | `remote_key_inject` | 10 | `{ key_code, direction }` |
@@ -101,18 +101,36 @@ generated once and reused for every pairing.
 
 ### Handshake
 
-1. Phone connects TLS and sends `remote_configure` with what it supports.
-2. TV replies `remote_configure` whose `code1` is a **feature bitmask**:
+The channel is **TV-driven**: the client never announces itself first.
+
+1. Phone connects TLS and waits. The TV sends `remote_configure` whose `code1` is a **feature
+   bitmask**:
 
 ```
 PING = 1<<0   KEY = 1<<1   IME = 1<<2   VOICE = 1<<3
 POWER = 1<<5  VOLUME = 1<<6  APP_LINK = 1<<9
 ```
 
-3. Phone replies `remote_configure` with `requested & supported`, and `remote_set_active` with the
-   same value. It answers every later `remote_set_active` too.
+2. Phone replies `remote_configure` with `requested & supported`, and `remote_set_active` with the
+   same value. It answers every later `remote_set_active` too, and sends no other configure.
+3. The TV then sends `remote_start { started }`. It accepts commands only from that point, so the
+   app reports the session as connected after `remote_start` arrives (with a 2 s grace for
+   firmware that omits it) rather than as soon as the configure reply is written.
 4. If `KEY` is missing the TV will ignore all key presses; the app reports that explicitly
    (the known fix on the TV side is clearing *Android TV Remote Service* app data).
+
+### Errors
+
+`remote_error { value = true, message = <the refused message> }` means the TV rejected a message
+it received, and it normally closes the socket right after. The echoed `message` is decoded, so
+the app names what was refused instead of showing a bare flag:
+
+```
+The TV rejected remote_key_inject (DPAD_CENTER).
+```
+
+There are three ways to provoke it: sending a client `remote_configure` before the TV's own,
+sending one twice, and sending commands before `remote_start`. Version 1.0.5 removed all three.
 
 ### Keep-alive
 

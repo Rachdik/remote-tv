@@ -22,6 +22,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import java.io.OutputStream
 import java.net.InetSocketAddress
@@ -57,6 +58,9 @@ class RemoteSession(
     private var configured = CompletableDeferred<TvDeviceInfo>()
     private var configuredInfo = TvDeviceInfo("", "", "")
 
+    /** Completed when the TV sends `RemoteStart`: only from then on does it accept commands. */
+    private var started = CompletableDeferred<Unit>()
+
     private var socket: SSLSocket? = null
     private var output: OutputStream? = null
     private var readerJob: Job? = null
@@ -91,15 +95,27 @@ class RemoteSession(
         activePort = port
         val attempt = ++generation
         configured = CompletableDeferred()
+        started = CompletableDeferred()
 
         try {
             val ssl = openTls(device.host, port, timeoutMs)
             socket = ssl
             output = ssl.outputStream
             startReader(ssl, attempt)
-            sendRaw(RemoteMessages.configure())
 
+            // The channel is TV-driven: the TV sends `RemoteConfigure` as soon as TLS is up and
+            // this client answers it in handleFrame(). Announcing ourselves first makes some
+            // TVs reply `RemoteError{value=true}` and hang up, so nothing is written until the
+            // TV speaks.
             val info = withTimeout(HANDSHAKE_TIMEOUT_MS) { configured.await() }
+
+            // `RemoteStart` is the TV's own "ready for commands" signal; the reference client
+            // waits for it before declaring the remote usable. Anything sent earlier can be
+            // rejected with `RemoteError` and the TV then closes the socket. Firmware that never
+            // sends it must still work, so this wait is bounded.
+            withTimeoutOrNull(READY_TIMEOUT_MS) { started.await() }
+            if (closed) throw IOException("The TV closed the connection during the handshake.")
+
             Log.i(TAG, "Control channel ready on ${device.host}:$port")
             return@withContext info
         } catch (e: Exception) {
@@ -161,6 +177,9 @@ class RemoteSession(
         socket = null
         output = null
         if (!configured.isCompleted) configured.cancel()
+        // Completing rather than cancelling keeps a waiting connect() from failing with a
+        // coroutine cancellation; it re-checks `closed` and reports the real reason.
+        if (!started.isCompleted) started.complete(Unit)
     }
 
     private fun startReader(sslSocket: SSLSocket, attempt: Int) {
@@ -189,6 +208,9 @@ class RemoteSession(
             Log.w(TAG, "Dropping an undecodable message from the TV", e)
             return
         }
+        if (events.any { it is RemoteMessages.Event.TvError }) {
+            Log.w(TAG, "TV error frame: ${frame.joinToString("") { "%02x".format(it) }}")
+        }
         for (event in events) {
             if (event !is RemoteMessages.Event.Ping) {
                 Log.i(TAG, "TV -> ${event::class.simpleName}")
@@ -208,20 +230,19 @@ class RemoteSession(
                     // sends it without a usable RemoteConfigure, so it also completes the
                     // handshake; otherwise the app would wait for a message that never comes.
                     if (!configured.isCompleted) configured.complete(configuredInfo)
+                    if (!started.isCompleted) started.complete(Unit)
                 }
                 is RemoteMessages.Event.SetActive -> {
                     // Only reply when the TV asks this client to become the active remote.
                     sendRaw(RemoteMessages.setActive(negotiatedFeatures))
                 }
                 is RemoteMessages.Event.TvError -> {
-                    // Reported by the TV when it refuses to talk to this client, most often
-                    // because it no longer recognises the paired certificate.
+                    // The TV echoes the message it refused in `RemoteError.message`, which the
+                    // parser decodes so the log and the UI can name it instead of guessing.
+                    Log.w(TAG, "TV refused a message: ${event.message}")
                     if (!configured.isCompleted) {
                         configured.completeExceptionally(
-                            IOException(
-                                "The TV refused the remote connection (${event.message}). " +
-                                    "On the TV, clear the data of Android TV Remote Service and pair again.",
-                            ),
+                            IOException("${event.message} The TV hung up instead of accepting the session."),
                         )
                     }
                 }
@@ -281,11 +302,15 @@ class RemoteSession(
         readerJob?.cancel()
         scope.cancel()
         if (!configured.isCompleted) configured.completeExceptionally(IOException(reason ?: "closed"))
+        if (!started.isCompleted) started.complete(Unit)
     }
 
     companion object {
         private const val TAG = "RemoteSession"
         private const val CONNECT_TIMEOUT_MS = 6000
         private const val HANDSHAKE_TIMEOUT_MS = 8000L
+
+        /** Grace period for `RemoteStart`, so firmware that omits it still connects. */
+        private const val READY_TIMEOUT_MS = 2000L
     }
 }
