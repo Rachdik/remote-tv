@@ -6,13 +6,13 @@ Two artifacts are produced:
 
 | File | Use |
 | --- | --- |
-| `dist/UniversalTVRemote-1.0.0-release.apk` | Signed release build. Use this on a phone. |
-| `dist/UniversalTVRemote-1.0.0-debug.apk` | Debug build with `-debug` suffix, installs side by side. |
+| `dist/UniversalTVRemote-1.0.1-release.apk` | Signed release build. Use this on a phone. |
+| `dist/UniversalTVRemote-1.0.1-debug.apk` | Debug build with `-debug` suffix, installs side by side. |
 
 Install over USB:
 
 ```bash
-adb install -r dist/UniversalTVRemote-1.0.0-release.apk
+adb install -r dist/UniversalTVRemote-1.0.1-release.apk
 ```
 
 Or copy the APK to the phone and open it (allow "install unknown apps" for the file manager).
@@ -89,3 +89,30 @@ No location permission is requested: discovery uses `NsdManager`, which does not
 Uninstalling removes the generated client identity and the paired device list. To re-pair without
 uninstalling, use **Devices → Forget**, and on the TV clear the data of *Android TV Remote
 Service*.
+
+## Troubleshooting
+
+### "The TV did not start the pairing dialog"
+
+The TV accepted the secure connection but never opened its pairing screen. The pairing service
+only advertises a dialog when it is idle, so a previous attempt that was interrupted can leave it
+occupied.
+
+1. Reboot the TV (power cycle, not standby).
+2. On the TV: **Settings → Apps → Show system apps → Android TV Remote Service → Storage → Clear data**.
+3. In the phone app, forget the TV, then pair again and keep the app in the foreground until it
+   finishes.
+
+### "The TV did not answer the configuration request"
+
+The control channel was established (TLS completed) but the TV ignored the handshake. This almost
+always means the TV no longer has this phone's certificate registered, which happens after the
+Remote Service data is cleared, a factory reset, or a failed pairing that the app could not detect.
+
+1. On the TV, clear the data of **Android TV Remote Service** as described above.
+2. In the app, forget the TV and pair it again.
+3. If it still ignores the handshake, make sure the phone and the TV are on the same subnet and that
+   the router does not have "AP isolation" / "client isolation" enabled.
+
+Version 1.0.1 retries the handshake on both service ports (6467 and 6466) and stops the automatic
+reconnect after four attempts instead of showing an endless "Connecting…" state.

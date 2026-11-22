@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -35,6 +36,10 @@ import javax.net.ssl.SSLSocket
  * `RemoteMessage` frames (see docs/PROTOCOL.md). Key presses, text edits and voice audio all
  * travel over this same socket; the TV keeps it open by sending ping requests, which must be
  * answered or the TV drops the client.
+ *
+ * Firmware differences are handled by trying both service ports: a TV that accepts the TLS
+ * handshake but never sends `RemoteConfigure` is indistinguishable from one whose control
+ * service lives on the other port, so the handshake is retried there before giving up.
  */
 class RemoteSession(
     val device: PairedDevice,
@@ -46,7 +51,8 @@ class RemoteSession(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val writeMutex = Mutex()
     private val closedOnce = AtomicBoolean(false)
-    private val configured = CompletableDeferred<TvDeviceInfo>()
+
+    private var configured = CompletableDeferred<TvDeviceInfo>()
 
     private var socket: SSLSocket? = null
     private var output: OutputStream? = null
@@ -60,6 +66,10 @@ class RemoteSession(
     var negotiatedFeatures: Int = 0
         private set
 
+    /** Port the control channel ended up on; the pairing port is stored alongside it. */
+    var activePort: Int = device.remotePort
+        private set
+
     val isConnected: Boolean get() = !closed
 
     /**
@@ -68,64 +78,86 @@ class RemoteSession(
      * @return the TV's model/vendor information.
      */
     suspend fun connect(timeoutMs: Int = CONNECT_TIMEOUT_MS): TvDeviceInfo = withContext(Dispatchers.IO) {
-        val (sslSocket, usedPort) = openTls(device.host, device.remotePort)
-        socket = sslSocket
-        output = sslSocket.outputStream
-        lastPort = usedPort
-        startReader(sslSocket)
-        sendRaw(RemoteMessages.configure())
-        val info = try {
-            withTimeout(HANDSHAKE_TIMEOUT_MS) { configured.await() }
-        } catch (e: Exception) {
-            close("The TV did not answer the configuration request", notify = true)
-            throw IOException("The TV did not answer the configuration request", e)
-        }
-        info
-    }
-
-    private var lastPort: Int = device.remotePort
-
-    /**
-     * Tries the configured port, then its counterpart.
-     *
-     * Devices in the wild answer on 6467, and a minority listen on 6466 for control and 6467 for
-     * pairing, so both are attempted before reporting a failure.
-     */
-    private fun openTls(host: String, preferredPort: Int): Pair<SSLSocket, Int> {
-        val context = ClientIdentity.sslContext(identity)
-        val candidates = listOf(preferredPort, if (preferredPort == 6467) 6466 else 6467).distinct()
+        val ports = listOf(device.remotePort, alternatePort(device.remotePort)).distinct()
         var lastError: Exception? = null
-        for (port in candidates) {
-            var raw: Socket? = null
+
+        for ((index, port) in ports.withIndex()) {
             try {
-                raw = Socket()
-                raw.tcpNoDelay = true
-                raw.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
-                raw.soTimeout = HANDSHAKE_TIMEOUT_MS.toInt()
-                val ssl = context.socketFactory.createSocket(raw, host, port, true) as SSLSocket
-                ssl.useClientMode = true
-                ssl.sslParameters = ssl.sslParameters.apply {
-                    val wanted = listOf("TLSv1.3", "TLSv1.2")
-                    val available = ssl.supportedProtocols.toSet()
-                    protocols = wanted.filter { it in available }.ifEmpty { listOf("TLSv1.2") }.toTypedArray()
+                val ssl = openTls(device.host, port, timeoutMs)
+                socket = ssl
+                output = ssl.outputStream
+                activePort = port
+                configured = CompletableDeferred()
+                startReader(ssl)
+
+                val info = try {
+                    sendRaw(RemoteMessages.configure())
+                    withTimeout(HANDSHAKE_TIMEOUT_MS) { configured.await() }
+                } catch (e: Exception) {
+                    // Silence here means either an unpaired certificate or the control service
+                    // living on the other port, so drop this socket and try again.
+                    abandon()
+                    throw e
                 }
-                ssl.startHandshake()
-                ssl.soTimeout = 0
-                Log.i(TAG, "TLS established with $host:$port")
-                return ssl to port
+
+                Log.i(TAG, "Control channel ready on ${device.host}:$port")
+                return@withContext info
             } catch (e: Exception) {
                 lastError = e
-                Log.w(TAG, "TLS connection to $host:$port failed: ${e.message}")
-                try {
-                    raw?.close()
-                } catch (_: IOException) {
-                }
+                Log.w(TAG, "Control handshake on ${device.host}:$port failed: ${e.message}")
+                if (index < ports.lastIndex) delay(REHANDSHAKE_DELAY_MS)
             }
         }
+
+        close(null)
         throw IOException(
-            "Could not open a secure connection to $host (ports ${candidates.joinToString("/")}).",
+            "The TV did not answer the configuration request on ${device.host} " +
+                "(ports ${ports.joinToString("/")}).",
             lastError,
         )
+    }
+
+    private fun alternatePort(port: Int): Int = if (port == 6467) 6466 else 6467
+
+    private fun openTls(host: String, port: Int, timeoutMs: Int): SSLSocket {
+        val context = ClientIdentity.sslContext(identity)
+        var raw: Socket? = null
+        return try {
+            raw = Socket()
+            raw.tcpNoDelay = true
+            raw.connect(InetSocketAddress(host, port), timeoutMs)
+            raw.soTimeout = HANDSHAKE_TIMEOUT_MS.toInt()
+            val ssl = context.socketFactory.createSocket(raw, host, port, true) as SSLSocket
+            ssl.useClientMode = true
+            ssl.sslParameters = ssl.sslParameters.apply {
+                val wanted = listOf("TLSv1.3", "TLSv1.2")
+                val available = ssl.supportedProtocols.toSet()
+                protocols = wanted.filter { it in available }.ifEmpty { listOf("TLSv1.2") }.toTypedArray()
+            }
+            ssl.startHandshake()
+            ssl.soTimeout = 0
+            Log.i(TAG, "TLS established with $host:$port")
+            ssl
+        } catch (e: Exception) {
+            try {
+                raw?.close()
+            } catch (_: IOException) {
+            }
+            throw e
+        }
+    }
+
+    /** Drops the current socket without ending the session, so the next attempt can reuse it. */
+    private fun abandon() {
+        readerJob?.cancel()
+        readerJob = null
+        try {
+            socket?.close()
+        } catch (_: IOException) {
+        }
+        socket = null
+        output = null
+        if (!configured.isCompleted) configured.cancel()
     }
 
     private fun startReader(sslSocket: SSLSocket) {
@@ -151,21 +183,21 @@ class RemoteSession(
             return
         }
         for (event in events) {
+            if (event !is RemoteMessages.Event.Ping) {
+                Log.i(TAG, "TV -> ${event::class.simpleName}")
+            }
             when (event) {
                 is RemoteMessages.Event.Ping -> sendRaw(RemoteMessages.pingResponse(event.value))
                 is RemoteMessages.Event.ConfigureReceived -> {
-                    val supported = event.features
-                    val negotiated = supported and Feature.REQUESTED
-                    negotiatedFeatures = negotiated
-                    // Reply with the negotiated mask so the TV knows what we will use, then mark
-                    // this client as the active remote.
-                    sendRaw(RemoteMessages.configure(negotiated))
-                    sendRaw(RemoteMessages.setActive(negotiated))
+                    // The TV announces its feature mask; answer with the subset we will use,
+                    // exactly as the reference client does.
+                    negotiatedFeatures = event.features and Feature.REQUESTED
+                    sendRaw(RemoteMessages.configure(negotiatedFeatures))
                     if (!configured.isCompleted) configured.complete(event.deviceInfo)
                 }
                 is RemoteMessages.Event.SetActive -> {
-                    // The TV asks the active client to confirm; answer with what we support.
-                    sendRaw(RemoteMessages.setActive(negotiatedFeatures or Feature.KEY))
+                    // Only reply when the TV asks this client to become the active remote.
+                    sendRaw(RemoteMessages.setActive(negotiatedFeatures))
                 }
                 else -> Unit
             }
@@ -225,6 +257,7 @@ class RemoteSession(
     companion object {
         private const val TAG = "RemoteSession"
         private const val CONNECT_TIMEOUT_MS = 6000
-        private const val HANDSHAKE_TIMEOUT_MS = 8000L
+        private const val HANDSHAKE_TIMEOUT_MS = 12000L
+        private const val REHANDSHAKE_DELAY_MS = 500L
     }
 }

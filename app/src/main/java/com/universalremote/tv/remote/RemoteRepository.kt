@@ -56,6 +56,7 @@ class RemoteRepository(context: Context) {
     private var session: RemoteSession? = null
     private var reconnectJob: Job? = null
     private var userDisconnected = false
+    private var reconnectAttempts = 0
 
     private val _connection = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connection: StateFlow<ConnectionState> = _connection.asStateFlow()
@@ -185,6 +186,7 @@ class RemoteRepository(context: Context) {
 
     fun connect(device: PairedDevice, remember: Boolean = true) {
         userDisconnected = false
+        reconnectAttempts = 0
         reconnectJob?.cancel()
         scope.launch {
             connectMutex.withLock {
@@ -204,6 +206,7 @@ class RemoteRepository(context: Context) {
                 try {
                     val info = newSession.connect()
                     session = newSession
+                    reconnectAttempts = 0
                     if (remember) {
                         store.setLastDeviceId(device.id)
                         // Keep the stored name in sync with what the TV reports.
@@ -216,7 +219,7 @@ class RemoteRepository(context: Context) {
                 } catch (e: Exception) {
                     newSession.close()
                     session = null
-                    _connection.value = ConnectionState.Failed(device, e.message ?: "Could not connect.")
+                    _connection.value = ConnectionState.Failed(device, explain(e.message))
                     scheduleReconnect(device)
                 }
             }
@@ -256,20 +259,32 @@ class RemoteRepository(context: Context) {
         if (userDisconnected || !store.autoReconnect) return
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
-            var attempt = 0
-            // Backs off to 15 s and keeps trying while the app is open.
+            // A TV that never answers will never answer by retrying forever; give the user a
+            // result and a reason instead of an endless "Connecting…" spinner.
             while (!userDisconnected && store.autoReconnect) {
-                attempt++
-                val wait = when {
-                    attempt <= 3 -> 1000L * attempt
-                    attempt <= 6 -> 5000L
-                    else -> 15000L
+                if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                    _connection.value = ConnectionState.Failed(
+                        device,
+                        "The TV stopped answering. Check that it is on, then tap to retry. " +
+                            "If it keeps failing, clear the data of Android TV Remote Service on the " +
+                            "TV and pair again.",
+                    )
+                    return@launch
+                }
+                reconnectAttempts++
+                val wait = when (reconnectAttempts) {
+                    1 -> 1000L
+                    2 -> 3000L
+                    else -> 6000L
                 }
                 delay(wait)
                 if (userDisconnected || !store.autoReconnect) return@launch
                 if (isConnected) return@launch
                 _connection.value = ConnectionState.Connecting(device)
-                val identity = store.loadIdentity() ?: return@launch
+                val identity = store.loadIdentity() ?: run {
+                    _connection.value = ConnectionState.Failed(device, "This TV has to be paired again.")
+                    return@launch
+                }
                 val candidate = RemoteSession(
                     device = device,
                     identity = identity,
@@ -279,13 +294,27 @@ class RemoteRepository(context: Context) {
                 try {
                     val info = candidate.connect()
                     session = candidate
+                    reconnectAttempts = 0
                     _connection.value = ConnectionState.Connected(device, info)
                     return@launch
                 } catch (e: Exception) {
                     candidate.close()
-                    _connection.value = ConnectionState.Failed(device, e.message ?: "Could not reconnect.")
+                    _connection.value = ConnectionState.Failed(device, explain(e.message))
                 }
             }
+        }
+    }
+
+    /** Adds the one fix that actually resolves a TV whose remote service stopped answering. */
+    private fun explain(reason: String?): String {
+        val base = reason ?: "Could not connect."
+        return if (base.contains("did not answer the configuration request")) {
+            "$base The TV accepted the secure connection but ignored the remote handshake. " +
+                "Usually the TV no longer has this phone registered: on the TV open Settings → " +
+                "Apps → Show system apps → Android TV Remote Service → Storage → Clear data, " +
+                "then pair this phone again."
+        } else {
+            base
         }
     }
 
@@ -384,5 +413,8 @@ class RemoteRepository(context: Context) {
 
     companion object {
         private const val TAG = "RemoteRepository"
+
+        /** Enough attempts to ride out a TV waking from standby, few enough to stop spinning. */
+        private const val MAX_RECONNECT_ATTEMPTS = 4
     }
 }

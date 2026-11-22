@@ -55,7 +55,7 @@ publishing anywhere.
 
 ## Install and first run
 
-1. Install `UniversalTVRemote-1.0.0-release.apk` (or the debug APK).
+1. Install `UniversalTVRemote-1.0.1-release.apk` (or the debug APK).
 2. Open the app. It scans the network automatically — TVs appear under *Found on network*.
    If multicast is filtered on your network, use **IP address** and type the TV's IP
    (TV: Settings → Network & Internet → your Wi-Fi → IP address).
