@@ -83,8 +83,8 @@ The following need a real phone and/or a real Android TV and were **not** execut
   against the JDK TLS implementation).
 * Voice capture through `AudioRecord` at 8 kHz on real hardware, and the TV's reaction to it.
 * `SpeechRecognizer` availability and Indonesian recognition quality on a real phone.
-* Real TVs' firmware quirks: which of 6466/6467 is pairing on a given model, sleep/wake behaviour,
-  and whether a given TV advertises the `VOICE` feature.
+* Real TVs' firmware quirks: sleep/wake behaviour, behaviour when a TV's remote service keeps a
+  stale record for a certificate, and whether a given TV advertises the `VOICE` feature.
 * Haptics, dark/light rendering, layout on small and large screens.
 * Release-build behaviour at runtime (the signed release APK was not executed).
 

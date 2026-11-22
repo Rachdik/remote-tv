@@ -14,11 +14,11 @@ No ADB is used anywhere.
 * Service type: `_androidtvremote2._tcp.` (DNS-SD / mDNS), queried through Android's
   `NsdManager`.
 * TXT records: `fn` = friendly name, `md` = model.
-* The advertised port is the control port (normally 6467).
+* The advertised port is the control port (6466).
 * Fallback 1: SSDP `M-SEARCH` for `urn:dial-multiscreen-org:service:dial:1`, then a TCP probe of
   the candidate address.
-* Fallback 2: manual IP. Both 6467 and 6466 are probed, because firmware varies in which port is
-  pairing and which is control.
+* Fallback 2: manual IP. Both 6466 and 6467 are probed to confirm the service is listening; the
+  roles of the two ports never change.
 
 A multicast lock is held while discovery runs, which is required for mDNS replies to reach an
 app on Android.
@@ -28,8 +28,9 @@ app on Android.
 ## 2. Transport
 
 * TCP with TLS, directly on the service port (no STARTTLS).
-* **Pairing port: 6466. Control port: 6467.** Both endpoints are tried in both roles when a
-  connection fails.
+* **Pairing port: 6467. Control port: 6466.** These are fixed. Sending a pairing request to 6466
+  does not fail at TLS level — the control service completes the handshake and then ignores the
+  frame — so the roles must never be swapped.
 * The phone presents a **self-signed RSA-2048 client certificate** generated on first launch. The
   TV stores its fingerprint during pairing and only accepts that certificate afterwards.
 * The TV's certificate is not CA-verified (the protocol has no PKI). See §7.

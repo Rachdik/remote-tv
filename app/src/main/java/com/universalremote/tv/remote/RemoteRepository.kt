@@ -117,7 +117,7 @@ class RemoteRepository(context: Context) {
         onCodeRequired: suspend () -> Unit,
         codeProvider: suspend () -> String?,
     ): Result<PairedDevice> {
-        val probe = TvProbe.probe(discovered.host, if (discovered.port > 0) discovered.port else PairedDevice.DEFAULT_REMOTE_PORT)
+        val probe = TvProbe.probe(discovered.host)
         if (!probe.reachable) {
             return Result.failure(IllegalStateException(probe.detail))
         }

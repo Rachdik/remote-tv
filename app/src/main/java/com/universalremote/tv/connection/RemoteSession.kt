@@ -4,6 +4,7 @@ import android.util.Log
 import com.universalremote.tv.crypto.ClientIdentity
 import com.universalremote.tv.protocol.Feature
 import com.universalremote.tv.protocol.KeyDirection
+import com.universalremote.tv.protocol.Ports
 import com.universalremote.tv.protocol.RemoteMessages
 import com.universalremote.tv.protocol.TvDeviceInfo
 import com.universalremote.tv.protocol.TvKey
@@ -16,7 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -37,11 +37,11 @@ import javax.net.ssl.SSLSocket
  * travel over this same socket; the TV keeps it open by sending ping requests, which must be
  * answered or the TV drops the client.
  *
- * Firmware differences are handled by trying both service ports: a TV that accepts the TLS
- * handshake but never sends `RemoteConfigure` is indistinguishable from one whose control
- * service lives on the other port, so the handshake is retried there before giving up. Each
- * attempt gets its own generation number, so a socket that failed half way through can never
- * tear down the attempt that follows it.
+ * The control service always listens on 6466. The pairing service on 6467 completes the same TLS
+ * handshake but never answers `RemoteConfigure`, so a stored pairing port is corrected before
+ * connecting instead of being mistaken for a TV that ignores this client. Each attempt gets its
+ * own generation number, so a socket that failed half way through can never tear down the next
+ * one.
  */
 class RemoteSession(
     val device: PairedDevice,
@@ -85,42 +85,36 @@ class RemoteSession(
      * @return the TV's model/vendor information.
      */
     suspend fun connect(timeoutMs: Int = CONNECT_TIMEOUT_MS): TvDeviceInfo = withContext(Dispatchers.IO) {
-        val ports = listOf(device.remotePort, alternatePort(device.remotePort)).distinct()
-        var lastError: Exception? = null
+        // The control channel always lives on 6466; 6467 is the pairing service and would accept
+        // TLS and then stay silent. Older builds stored the two ports the wrong way round.
+        val port = controlPortFor(device.remotePort)
+        activePort = port
+        val attempt = ++generation
+        configured = CompletableDeferred()
 
-        for ((index, port) in ports.withIndex()) {
-            if (closed) break
-            val attempt = ++generation
-            configured = CompletableDeferred()
+        try {
+            val ssl = openTls(device.host, port, timeoutMs)
+            socket = ssl
+            output = ssl.outputStream
+            startReader(ssl, attempt)
+            sendRaw(RemoteMessages.configure())
 
-            try {
-                val ssl = openTls(device.host, port, timeoutMs)
-                socket = ssl
-                output = ssl.outputStream
-                activePort = port
-                startReader(ssl, attempt)
-                sendRaw(RemoteMessages.configure())
-
-                val info = withTimeout(HANDSHAKE_TIMEOUT_MS) { configured.await() }
-                Log.i(TAG, "Control channel ready on ${device.host}:$port")
-                return@withContext info
-            } catch (e: Exception) {
-                lastError = e
-                Log.w(TAG, "Control handshake on ${device.host}:$port failed: ${e.message}")
-                dropAttempt(attempt)
-                if (index < ports.lastIndex) delay(REHANDSHAKE_DELAY_MS)
-            }
+            val info = withTimeout(HANDSHAKE_TIMEOUT_MS) { configured.await() }
+            Log.i(TAG, "Control channel ready on ${device.host}:$port")
+            return@withContext info
+        } catch (e: Exception) {
+            Log.w(TAG, "Control handshake on ${device.host}:$port failed: ${e.message}")
+            dropAttempt(attempt)
+            close(null)
+            throw IOException(
+                "The TV did not answer the configuration request on ${device.host} (port $port).",
+                e,
+            )
         }
-
-        close(null)
-        throw IOException(
-            "The TV did not answer the configuration request on ${device.host} " +
-                "(ports ${ports.joinToString("/")}).",
-            lastError,
-        )
     }
 
-    private fun alternatePort(port: Int): Int = if (port == 6467) 6466 else 6467
+    /** Corrects a stored pairing port, so the control handshake is never sent to 6467. */
+    private fun controlPortFor(port: Int): Int = if (port == Ports.PAIRING) Ports.CONTROL else port
 
     private fun openTls(host: String, port: Int, timeoutMs: Int): SSLSocket {
         val context = ClientIdentity.sslContext(identity)
@@ -293,6 +287,5 @@ class RemoteSession(
         private const val TAG = "RemoteSession"
         private const val CONNECT_TIMEOUT_MS = 6000
         private const val HANDSHAKE_TIMEOUT_MS = 8000L
-        private const val REHANDSHAKE_DELAY_MS = 500L
     }
 }

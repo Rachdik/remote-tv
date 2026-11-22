@@ -108,12 +108,12 @@ data class TextFieldInfo(val fieldCounter: Int, val value: String, val focused: 
 
 /**
  * Builders and parser for the `RemoteMessage` envelope used on the remote channel (TLS, port
- * 6467 by default).
+ * 6466).
  */
 object RemoteMessages {
 
     private const val CLIENT_PACKAGE = "com.universalremote.tv"
-    private const val CLIENT_VERSION = "1.0.3"
+    private const val CLIENT_VERSION = "1.0.4"
 
     /** `RemoteConfigure` with this client's feature mask and device information. */
     fun configure(code1: Int = Feature.REQUESTED): ByteArray =

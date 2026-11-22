@@ -24,7 +24,7 @@ The code dialog appears **after** the phone contacts the TV, so start pairing fr
 
 ## What happens under the hood
 
-* The phone opens TLS to port 6466 and sends a pairing request naming itself.
+* The phone opens TLS to port 6467 and sends a pairing request naming itself.
 * Both sides agree on a six-character hexadecimal code.
 * The phone combines both certificates' public keys with the code and sends the SHA-256 digest.
 * The TV compares it with what its screen shows. On success it remembers the phone's certificate
@@ -63,7 +63,7 @@ on the TV side as well, clear the data of *Android TV Remote Service* on the TV.
 | Symptom | Cause / fix |
 | --- | --- |
 | No TV found | Guest Wi-Fi or AP isolation blocks multicast; use the IP address. Make sure the TV is on the same subnet. |
-| "Could not reach the TV's pairing service" | TV off, wrong IP, or remote service disabled. Check that port 6467/6466 is reachable on the same LAN. |
+| "Could not reach the TV's pairing service" | TV off, wrong IP, or remote service disabled. Check that port 6467 is reachable on the same LAN. |
 | TV shows no code | Remote service needs a restart (clear its data) or the TV is on a very old firmware. |
 | Pairing succeeds but keys do nothing | The TV's remote service is in a bad state: clear its data on the TV, forget the device here, pair again. |
 | Connection drops repeatedly | The TV closes idle clients that stop answering pings; the app answers them. Repeated drops usually mean weak Wi-Fi or the TV going to sleep. |

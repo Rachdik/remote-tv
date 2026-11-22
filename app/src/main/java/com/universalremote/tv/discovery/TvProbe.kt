@@ -1,6 +1,6 @@
 package com.universalremote.tv.discovery
 
-import com.universalremote.tv.storage.PairedDevice
+import com.universalremote.tv.protocol.Ports
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.InetSocketAddress
@@ -20,50 +20,49 @@ data class ProbeResult(
 /**
  * Checks whether a host runs the Android TV remote service.
  *
- * Both service ports are probed by opening and immediately closing a TCP connection: no data is
- * sent before pairing, so a reachable port means the TV is a candidate. Ports 6467 and 6466 are
- * tried in both roles because firmware varies in which one is pairing and which one is control.
+ * Both services have fixed ports: [Ports.CONTROL] for the remote channel and [Ports.PAIRING] for
+ * pairing. One open TCP port is enough to make the host a candidate, since nothing can be sent
+ * before pairing, but the roles never change: pairing on the control port would complete TLS and
+ * then hang, because the control service ignores pairing frames.
  */
 object TvProbe {
 
     private const val TIMEOUT_MS = 2500
 
-    suspend fun probe(host: String, preferredRemotePort: Int = PairedDevice.DEFAULT_REMOTE_PORT): ProbeResult =
-        withContext(Dispatchers.IO) {
-            val cleanHost = host.trim().removePrefix("http://").removePrefix("https://").substringBefore('/')
-            val remoteFirst = listOf(preferredRemotePort, if (preferredRemotePort == 6467) 6466 else 6467)
-            val open = remoteFirst.filter { isOpen(cleanHost, it) }
+    suspend fun probe(host: String): ProbeResult = withContext(Dispatchers.IO) {
+        val cleanHost = host.trim().removePrefix("http://").removePrefix("https://").substringBefore('/')
+        val controlOpen = isOpen(cleanHost, Ports.CONTROL)
+        val pairingOpen = isOpen(cleanHost, Ports.PAIRING)
 
-            when {
-                open.isEmpty() -> ProbeResult(
-                    host = cleanHost,
-                    reachable = false,
-                    remotePort = preferredRemotePort,
-                    pairingPort = if (preferredRemotePort == 6467) 6466 else 6467,
-                    detail = "No Android TV remote service answered on $cleanHost. Check the IP address and that the TV is on.",
-                )
+        when {
+            controlOpen && pairingOpen -> ProbeResult(
+                host = cleanHost,
+                reachable = true,
+                remotePort = Ports.CONTROL,
+                pairingPort = Ports.PAIRING,
+                detail = "Found the remote service on ports ${Ports.CONTROL} and ${Ports.PAIRING}.",
+            )
 
-                open.size == 1 -> {
-                    val port = open.first()
-                    // A single open port is enough: connect() falls back to the other one.
-                    ProbeResult(
-                        host = cleanHost,
-                        reachable = true,
-                        remotePort = port,
-                        pairingPort = if (port == 6467) 6466 else 6467,
-                        detail = "Found the remote service on port $port.",
-                    )
-                }
-
-                else -> ProbeResult(
+            controlOpen || pairingOpen -> {
+                val port = if (controlOpen) Ports.CONTROL else Ports.PAIRING
+                ProbeResult(
                     host = cleanHost,
                     reachable = true,
-                    remotePort = 6467,
-                    pairingPort = 6466,
-                    detail = "Both remote service ports are open.",
+                    remotePort = Ports.CONTROL,
+                    pairingPort = Ports.PAIRING,
+                    detail = "Found the remote service on port $port.",
                 )
             }
+
+            else -> ProbeResult(
+                host = cleanHost,
+                reachable = false,
+                remotePort = Ports.CONTROL,
+                pairingPort = Ports.PAIRING,
+                detail = "No Android TV remote service answered on $cleanHost. Check the IP address and that the TV is on.",
+            )
         }
+    }
 
     private fun isOpen(host: String, port: Int): Boolean {
         if (host.isBlank()) return false

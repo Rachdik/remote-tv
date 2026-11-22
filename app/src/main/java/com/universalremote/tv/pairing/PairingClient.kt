@@ -3,6 +3,7 @@ package com.universalremote.tv.pairing
 import android.util.Log
 import com.universalremote.tv.crypto.ClientIdentity
 import com.universalremote.tv.protocol.PairingMessage
+import com.universalremote.tv.protocol.Ports
 import com.universalremote.tv.protocol.readFrame
 import com.universalremote.tv.protocol.writeFrame
 import kotlinx.coroutines.CompletableDeferred
@@ -60,8 +61,8 @@ class PairingStalledException(
  * 2. [submitCode] verifies the code against the TV's certificate, sends the derived secret and
  *    waits for the TV to acknowledge it.
  *
- * Everything happens on the pairing port (6466 by default); the control connection uses the same
- * client certificate afterwards.
+ * Everything happens on the pairing port (6467); the control connection uses the same client
+ * certificate afterwards on port 6466.
  */
 class PairingClient(
     private val host: String,
@@ -151,50 +152,51 @@ class PairingClient(
     private fun connect() {
         stage = PairingStalledException.STAGE_CONNECT
         val context = ClientIdentity.sslContext(identity)
-        val candidates = listOf(port, if (port == 6466) 6467 else 6466).distinct()
-
-        for (candidate in candidates) {
-            var raw: Socket? = null
-            try {
-                raw = Socket()
-                raw.tcpNoDelay = true
-                raw.connect(InetSocketAddress(host, candidate), 6000)
-                raw.soTimeout = 8000
-                val candidateSocket =
-                    context.socketFactory.createSocket(raw, host, candidate, true) as SSLSocket
-                candidateSocket.useClientMode = true
-                candidateSocket.sslParameters = candidateSocket.sslParameters.apply {
-                    val available = candidateSocket.supportedProtocols.toSet()
-                    protocols = listOf("TLSv1.3", "TLSv1.2").filter { it in available }
-                        .ifEmpty { listOf("TLSv1.2") }.toTypedArray()
-                }
-                candidateSocket.startHandshake()
-                candidateSocket.soTimeout = 0
-
-                activePort = candidate
-                socket = candidateSocket
-                output = candidateSocket.outputStream
-                serverCertificate = candidateSocket.session.peerCertificates.firstOrNull() as? X509Certificate
-                tlsSummary = describeTls(candidateSocket)
-                Log.i(TAG, "Pairing TLS ready on $host:$candidate — $tlsSummary")
-
-                launchReader(candidateSocket)
-                return
-            } catch (e: Exception) {
-                lastTlsError = e.message ?: e.javaClass.simpleName
-                Log.w(TAG, "Pairing TLS to $host:$candidate failed: $lastTlsError")
-                try {
-                    raw?.close()
-                } catch (_: IOException) {
-                }
+        val target = pairingPortFor(port)
+        activePort = target
+        var raw: Socket? = null
+        try {
+            raw = Socket()
+            raw.tcpNoDelay = true
+            raw.connect(InetSocketAddress(host, target), 6000)
+            raw.soTimeout = 8000
+            val ssl = context.socketFactory.createSocket(raw, host, target, true) as SSLSocket
+            ssl.useClientMode = true
+            ssl.sslParameters = ssl.sslParameters.apply {
+                val available = ssl.supportedProtocols.toSet()
+                protocols = listOf("TLSv1.3", "TLSv1.2").filter { it in available }
+                    .ifEmpty { listOf("TLSv1.2") }.toTypedArray()
             }
-        }
+            ssl.startHandshake()
+            ssl.soTimeout = 0
 
-        throw PairingStalledException(
-            PairingStalledException.STAGE_CONNECT,
-            stallDetail(PairingStalledException.STAGE_CONNECT, null),
-        )
+            socket = ssl
+            output = ssl.outputStream
+            serverCertificate = ssl.session.peerCertificates.firstOrNull() as? X509Certificate
+            tlsSummary = describeTls(ssl)
+            Log.i(TAG, "Pairing TLS ready on $host:$target — $tlsSummary")
+
+            launchReader(ssl)
+        } catch (e: Exception) {
+            lastTlsError = e.message ?: e.javaClass.simpleName
+            Log.w(TAG, "Pairing TLS to $host:$target failed: $lastTlsError")
+            try {
+                raw?.close()
+            } catch (_: IOException) {
+            }
+            throw PairingStalledException(
+                PairingStalledException.STAGE_CONNECT,
+                stallDetail(PairingStalledException.STAGE_CONNECT, null),
+            )
+        }
     }
+
+    /**
+     * Pairing lives on 6467. 6466 is the control service: it accepts the same TLS handshake and
+     * then ignores pairing frames, which looks exactly like a TV that never shows a code. Builds
+     * up to 1.0.3 stored the two ports the wrong way round, so 6466 is corrected here.
+     */
+    private fun pairingPortFor(port: Int): Int = if (port == Ports.CONTROL) Ports.PAIRING else port
 
     /**
      * Records the negotiated session and, importantly, whether the TV actually received this

@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Base64
 import android.util.Log
 import com.universalremote.tv.crypto.ClientIdentity
+import com.universalremote.tv.protocol.Ports
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.KeyStore
@@ -25,8 +26,8 @@ data class PairedDevice(
     val pairedAt: Long = System.currentTimeMillis(),
 ) {
     companion object {
-        const val DEFAULT_REMOTE_PORT = 6467
-        const val DEFAULT_PAIRING_PORT = 6466
+        const val DEFAULT_REMOTE_PORT = Ports.CONTROL
+        const val DEFAULT_PAIRING_PORT = Ports.PAIRING
     }
 }
 
@@ -88,8 +89,10 @@ class DeviceStore(context: Context) {
                     name = json.optString("name", "Android TV"),
                     host = json.getString("host"),
                     model = json.optString("model", ""),
-                    remotePort = json.optInt("remotePort", PairedDevice.DEFAULT_REMOTE_PORT),
-                    pairingPort = json.optInt("pairingPort", PairedDevice.DEFAULT_PAIRING_PORT),
+                    // The service ports are fixed. Builds up to 1.0.3 stored them the wrong way
+                    // round (pairing 6466, control 6467), so stored values are not reused.
+                    remotePort = PairedDevice.DEFAULT_REMOTE_PORT,
+                    pairingPort = PairedDevice.DEFAULT_PAIRING_PORT,
                     pairedAt = json.optLong("pairedAt", 0L),
                 )
             }

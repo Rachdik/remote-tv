@@ -6,13 +6,13 @@ Two artifacts are produced:
 
 | File | Use |
 | --- | --- |
-| `dist/UniversalTVRemote-1.0.3-release.apk` | Signed release build. Use this on a phone. |
-| `dist/UniversalTVRemote-1.0.3-debug.apk` | Debug build with `-debug` suffix, installs side by side. |
+| `dist/UniversalTVRemote-1.0.4-release.apk` | Signed release build. Use this on a phone. |
+| `dist/UniversalTVRemote-1.0.4-debug.apk` | Debug build with `-debug` suffix, installs side by side. |
 
 Install over USB:
 
 ```bash
-adb install -r dist/UniversalTVRemote-1.0.3-release.apk
+adb install -r dist/UniversalTVRemote-1.0.4-release.apk
 ```
 
 Or copy the APK to the phone and open it (allow "install unknown apps" for the file manager).
@@ -148,3 +148,11 @@ down the whole session, so the retry on the second port never sent anything and 
 `RemoteStart` (the TV's own ready signal) also completes the handshake on firmware that never sends
 `RemoteConfigure` back. Each control attempt is logged under the `RemoteSession` tag with the TLS
 session, the port and every message the TV sends.
+
+Version 1.0.4 fixes the cause of "the TV never shows a code": the app had the two service ports
+swapped and sent the pairing request to **6466** (the control channel) instead of **6467** (the
+pairing channel). The control service completes the TLS handshake — which is why the log said
+`client certificate presented` — and then ignores pairing frames, so the TV never answered. Ports
+are now `Ports.CONTROL = 6466` / `Ports.PAIRING = 6467`, stored devices from older builds are
+migrated, and pairing never falls back to the control port. Devices paired with an earlier build
+have to be forgotten and paired again.
