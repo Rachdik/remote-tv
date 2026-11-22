@@ -65,6 +65,18 @@ class DeviceStore(context: Context) {
         return identity
     }
 
+    /**
+     * Replaces the stored identity with a brand new one.
+     *
+     * Used only when a TV ignores a client certificate completely, which happens when the
+     * service still holds a broken pairing record for this certificate.
+     */
+    fun resetIdentity(deviceName: String): ClientIdentity {
+        val identity = ClientIdentity.generate(deviceName)
+        saveIdentity(identity)
+        return identity
+    }
+
     fun devices(): List<PairedDevice> {
         val raw = prefs.getString(KEY_DEVICES, null) ?: return emptyList()
         return try {

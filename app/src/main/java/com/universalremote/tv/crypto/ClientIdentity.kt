@@ -15,13 +15,19 @@ import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.security.interfaces.RSAPublicKey
 import java.security.spec.PKCS8EncodedKeySpec
+import java.net.Socket
+import java.security.Principal
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import javax.net.ssl.KeyManager
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLEngine
 import javax.net.ssl.TrustManager
+import javax.net.ssl.X509ExtendedKeyManager
+import javax.net.ssl.X509KeyManager
 import javax.net.ssl.X509TrustManager
 
 /**
@@ -138,6 +144,9 @@ class ClientIdentity(
 
             val keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
             keyManagerFactory.init(store, PASSWORD)
+            val delegate = keyManagerFactory.keyManagers.filterIsInstance<X509KeyManager>().firstOrNull()
+            val keyManagers: Array<KeyManager> =
+                if (delegate != null) arrayOf(AlwaysPresentKeyManager(delegate)) else keyManagerFactory.keyManagers
 
             val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
                 override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
@@ -146,7 +155,7 @@ class ClientIdentity(
             })
 
             return SSLContext.getInstance("TLS").apply {
-                init(keyManagerFactory.keyManagers, trustAll, SecureRandom())
+                init(keyManagers, trustAll, SecureRandom())
             }
         }
 
@@ -206,6 +215,64 @@ class ClientIdentity(
             }
         }
     }
+}
+
+/**
+ * Key manager that always offers this app's single client certificate.
+ *
+ * A TLS client only sends a certificate when the server asks for one and a client alias matches
+ * the server's list of acceptable issuers. The TV's pairing service asks without advertising any
+ * issuer, and issuer-filtered selection can then answer "no alias", leaving the TV without the
+ * certificate it needs to derive the pairing secret. Since the app owns exactly one identity,
+ * answering every request with it is both safe and deterministic.
+ */
+private class AlwaysPresentKeyManager(private val delegate: X509KeyManager) : X509ExtendedKeyManager() {
+
+    private val alias: String? =
+        delegate.getClientAliases("RSA", null)?.firstOrNull()
+            ?: delegate.chooseClientAlias(arrayOf("RSA"), null, null)
+
+    override fun chooseClientAlias(
+        keyType: Array<out String>?,
+        issuers: Array<out Principal>?,
+        socket: Socket?,
+    ): String? = alias
+
+    override fun chooseEngineClientAlias(
+        keyType: Array<out String>?,
+        issuers: Array<out Principal>?,
+        engine: SSLEngine?,
+    ): String? = alias
+
+    override fun getClientAliases(keyType: String?, issuers: Array<out Principal>?): Array<String>? =
+        alias?.let { arrayOf(it) }
+
+    override fun getCertificateChain(serverAlias: String?): Array<X509Certificate>? {
+        val current = alias ?: return null
+        return delegate.getCertificateChain(current)
+    }
+
+    override fun getPrivateKey(serverAlias: String?): PrivateKey? {
+        val current = alias ?: return null
+        return delegate.getPrivateKey(current)
+    }
+
+    // Server-side selection only matters for the local test TV; delegate it unchanged.
+    override fun chooseServerAlias(
+        keyType: String?,
+        issuers: Array<out Principal>?,
+        socket: Socket?,
+    ): String? = delegate.chooseServerAlias(keyType, issuers, socket)
+
+    override fun chooseEngineServerAlias(
+        keyType: String?,
+        issuers: Array<out Principal>?,
+        engine: SSLEngine?,
+    ): String? = (delegate as? X509ExtendedKeyManager)?.chooseEngineServerAlias(keyType, issuers, engine)
+        ?: delegate.chooseServerAlias(keyType, issuers, null)
+
+    override fun getServerAliases(keyType: String?, issuers: Array<out Principal>?): Array<String>? =
+        delegate.getServerAliases(keyType, issuers)
 }
 
 /** Tiny DER encoder, enough for a self-signed X.509 v3 certificate. */

@@ -6,13 +6,13 @@ Two artifacts are produced:
 
 | File | Use |
 | --- | --- |
-| `dist/UniversalTVRemote-1.0.1-release.apk` | Signed release build. Use this on a phone. |
-| `dist/UniversalTVRemote-1.0.1-debug.apk` | Debug build with `-debug` suffix, installs side by side. |
+| `dist/UniversalTVRemote-1.0.2-release.apk` | Signed release build. Use this on a phone. |
+| `dist/UniversalTVRemote-1.0.2-debug.apk` | Debug build with `-debug` suffix, installs side by side. |
 
 Install over USB:
 
 ```bash
-adb install -r dist/UniversalTVRemote-1.0.1-release.apk
+adb install -r dist/UniversalTVRemote-1.0.2-release.apk
 ```
 
 Or copy the APK to the phone and open it (allow "install unknown apps" for the file manager).
@@ -103,6 +103,27 @@ occupied.
 3. In the phone app, forget the TV, then pair again and keep the app in the foreground until it
    finishes.
 
+Since 1.0.2 the message ends with where the handshake stopped and how the TLS session looked, for
+example:
+
+```
+The TV did not start the pairing dialog. It accepted the connection but never answered the
+pairing request, so no code appeared on the TV. Connection: TLSv1.2 TLS_AES_128_GCM_SHA256,
+client certificate presented, TV certificate 8f3c1a20.
+```
+
+* `client certificate presented` — the TV received this phone's certificate, so the problem is on
+  the TV side (stale pairing record, see step 2).
+* `client certificate NOT presented` — the TV never asked for it; update to a build from this
+  repository, this was fixed by always answering the TV's certificate request.
+* `Nothing answered on port 6466` — the TV's remote service is not listening; check the IP and that
+  the TV is fully awake.
+
+If the TV never acknowledges the pairing request at all, the app now retries once with a freshly
+generated client certificate, because a TV can keep a broken record for a certificate it has
+already seen. This retry is skipped when you already have other TVs paired, since the same
+certificate is what those TVs trust.
+
 ### "The TV did not answer the configuration request"
 
 The control channel was established (TLS completed) but the TV ignored the handshake. This almost
@@ -116,3 +137,7 @@ Remote Service data is cleared, a factory reset, or a failed pairing that the ap
 
 Version 1.0.1 retries the handshake on both service ports (6467 and 6466) and stops the automatic
 reconnect after four attempts instead of showing an endless "Connecting…" state.
+
+Version 1.0.2 always presents the client certificate on the pairing connection (TLS clients can
+otherwise skip it when the TV asks without listing acceptable issuers), logs every pairing frame
+under the `PairingClient` tag, and reports the exact step that stalled.

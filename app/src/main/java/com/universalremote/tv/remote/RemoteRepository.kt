@@ -7,6 +7,7 @@ import com.universalremote.tv.discovery.DiscoveredTv
 import com.universalremote.tv.discovery.TvProbe
 import com.universalremote.tv.pairing.InvalidPairingCodeException
 import com.universalremote.tv.pairing.PairingClient
+import com.universalremote.tv.pairing.PairingStalledException
 import com.universalremote.tv.protocol.Feature
 import com.universalremote.tv.protocol.RemoteMessages
 import com.universalremote.tv.protocol.TextFieldInfo
@@ -142,34 +143,51 @@ class RemoteRepository(context: Context) {
         onCodeRequired: suspend () -> Unit,
         codeProvider: suspend () -> String?,
     ): Result<PairedDevice> {
-        val identity = store.identityOrCreate(clientName)
-        val client = PairingClient(host, pairingPort, identity, clientName)
-        return try {
-            val serverName = client.start()
-            onCodeRequired()
-            val code = codeProvider() ?: return Result.failure(
-                IllegalStateException("Pairing was cancelled."),
-            )
-            client.submitCode(code.trim())
-            val device = PairedDevice(
-                id = UUID.randomUUID().toString(),
-                name = name.ifBlank { serverName },
-                host = host,
-                model = model,
-                remotePort = remotePort,
-                pairingPort = pairingPort,
-            )
-            store.saveDevice(device)
-            store.setLastDeviceId(device.id)
-            refreshDevices()
-            Result.success(device)
-        } catch (e: InvalidPairingCodeException) {
-            Result.failure(e)
-        } catch (e: Exception) {
-            Log.w(TAG, "Pairing failed", e)
-            Result.failure(e)
-        } finally {
-            client.close()
+        var identity = store.identityOrCreate(clientName)
+        var freshIdentity = false
+
+        while (true) {
+            val client = PairingClient(host, pairingPort, identity, clientName)
+            try {
+                val serverName = client.start()
+                onCodeRequired()
+                val code = codeProvider() ?: return Result.failure(
+                    IllegalStateException("Pairing was cancelled."),
+                )
+                client.submitCode(code.trim())
+                val device = PairedDevice(
+                    id = UUID.randomUUID().toString(),
+                    name = name.ifBlank { serverName },
+                    host = host,
+                    model = model,
+                    remotePort = remotePort,
+                    pairingPort = pairingPort,
+                )
+                store.saveDevice(device)
+                store.setLastDeviceId(device.id)
+                refreshDevices()
+                return Result.success(device)
+            } catch (e: InvalidPairingCodeException) {
+                return Result.failure(e)
+            } catch (e: PairingStalledException) {
+                // The TV ignored this client from the start: give it a certificate it has never
+                // seen before and try once more. Only safe while nothing else is paired, because
+                // the old certificate is what every saved TV trusts.
+                if (!freshIdentity && e.retryWithNewIdentity && store.devices().isEmpty()) {
+                    Log.w(TAG, "Pairing stalled at '${e.stage}'; retrying once with a new client certificate", e)
+                    _messages.tryEmit("The TV ignored this phone's certificate. Retrying with a new one…")
+                    identity = store.resetIdentity(clientName)
+                    freshIdentity = true
+                    continue
+                }
+                Log.w(TAG, "Pairing failed", e)
+                return Result.failure(e)
+            } catch (e: Exception) {
+                Log.w(TAG, "Pairing failed", e)
+                return Result.failure(e)
+            } finally {
+                client.close()
+            }
         }
     }
 
