@@ -9,6 +9,22 @@ Kotlin · Jetpack Compose · MVVM · Coroutines/StateFlow · minSdk 25 (Android 
 
 ---
 
+## Download
+
+The built APKs are committed to this repository, so there is nothing to compile to try the app.
+Android 7.1.2 (API 25) or newer is required.
+
+| Build | Download |
+| --- | --- |
+| **Release 1.0.5** (signed, use this) | [UniversalTVRemote-1.0.5-release.apk](https://github.com/Rachdik/remote-tv/raw/main/dist/UniversalTVRemote-1.0.5-release.apk) |
+| Debug 1.0.5 (installs side by side) | [UniversalTVRemote-1.0.5-debug.apk](https://github.com/Rachdik/remote-tv/raw/main/dist/UniversalTVRemote-1.0.5-debug.apk) |
+
+On the phone, open the link and allow "install unknown apps" for the browser. Over USB:
+`adb install -r UniversalTVRemote-1.0.5-release.apk`. See [docs/INSTALL.md](docs/INSTALL.md) for
+pairing and troubleshooting.
+
+---
+
 ## What it does
 
 | Area | Status |
