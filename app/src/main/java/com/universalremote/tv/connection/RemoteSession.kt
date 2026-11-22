@@ -39,7 +39,9 @@ import javax.net.ssl.SSLSocket
  *
  * Firmware differences are handled by trying both service ports: a TV that accepts the TLS
  * handshake but never sends `RemoteConfigure` is indistinguishable from one whose control
- * service lives on the other port, so the handshake is retried there before giving up.
+ * service lives on the other port, so the handshake is retried there before giving up. Each
+ * attempt gets its own generation number, so a socket that failed half way through can never
+ * tear down the attempt that follows it.
  */
 class RemoteSession(
     val device: PairedDevice,
@@ -53,10 +55,15 @@ class RemoteSession(
     private val closedOnce = AtomicBoolean(false)
 
     private var configured = CompletableDeferred<TvDeviceInfo>()
+    private var configuredInfo = TvDeviceInfo("", "", "")
 
     private var socket: SSLSocket? = null
     private var output: OutputStream? = null
     private var readerJob: Job? = null
+
+    /** Bumped for every connection attempt; anything from an older attempt is ignored. */
+    @Volatile
+    private var generation = 0
 
     @Volatile
     private var closed = false
@@ -82,29 +89,25 @@ class RemoteSession(
         var lastError: Exception? = null
 
         for ((index, port) in ports.withIndex()) {
+            if (closed) break
+            val attempt = ++generation
+            configured = CompletableDeferred()
+
             try {
                 val ssl = openTls(device.host, port, timeoutMs)
                 socket = ssl
                 output = ssl.outputStream
                 activePort = port
-                configured = CompletableDeferred()
-                startReader(ssl)
+                startReader(ssl, attempt)
+                sendRaw(RemoteMessages.configure())
 
-                val info = try {
-                    sendRaw(RemoteMessages.configure())
-                    withTimeout(HANDSHAKE_TIMEOUT_MS) { configured.await() }
-                } catch (e: Exception) {
-                    // Silence here means either an unpaired certificate or the control service
-                    // living on the other port, so drop this socket and try again.
-                    abandon()
-                    throw e
-                }
-
+                val info = withTimeout(HANDSHAKE_TIMEOUT_MS) { configured.await() }
                 Log.i(TAG, "Control channel ready on ${device.host}:$port")
                 return@withContext info
             } catch (e: Exception) {
                 lastError = e
                 Log.w(TAG, "Control handshake on ${device.host}:$port failed: ${e.message}")
+                dropAttempt(attempt)
                 if (index < ports.lastIndex) delay(REHANDSHAKE_DELAY_MS)
             }
         }
@@ -136,7 +139,9 @@ class RemoteSession(
             }
             ssl.startHandshake()
             ssl.soTimeout = 0
-            Log.i(TAG, "TLS established with $host:$port")
+            val session = ssl.session
+            val certificate = if (session.localCertificates.isNullOrEmpty()) "NOT presented" else "presented"
+            Log.i(TAG, "TLS established with $host:$port (${session.protocol}, client certificate $certificate)")
             ssl
         } catch (e: Exception) {
             try {
@@ -147,8 +152,12 @@ class RemoteSession(
         }
     }
 
-    /** Drops the current socket without ending the session, so the next attempt can reuse it. */
-    private fun abandon() {
+    /**
+     * Drops one attempt without ending the session, so the next port can be tried on a live scope.
+     * Bumping [generation] makes the abandoned reader stay silent instead of closing the session.
+     */
+    private fun dropAttempt(finished: Int) {
+        if (generation == finished) generation++
         readerJob?.cancel()
         readerJob = null
         try {
@@ -160,17 +169,21 @@ class RemoteSession(
         if (!configured.isCompleted) configured.cancel()
     }
 
-    private fun startReader(sslSocket: SSLSocket) {
+    private fun startReader(sslSocket: SSLSocket, attempt: Int) {
         readerJob = scope.launch {
             try {
                 val input = sslSocket.inputStream
-                while (!closed) {
+                while (!closed && attempt == generation) {
                     val frame = readFrame(input) ?: break
                     handleFrame(frame)
                 }
-                close("The TV closed the connection", notify = true)
+                if (!closed && attempt == generation) {
+                    close("The TV closed the connection", notify = true)
+                }
             } catch (e: Exception) {
-                if (!closed) close(e.message ?: "The connection was lost", notify = true)
+                if (!closed && attempt == generation) {
+                    close(e.message ?: "The connection was lost", notify = true)
+                }
             }
         }
     }
@@ -191,13 +204,32 @@ class RemoteSession(
                 is RemoteMessages.Event.ConfigureReceived -> {
                     // The TV announces its feature mask; answer with the subset we will use,
                     // exactly as the reference client does.
+                    configuredInfo = event.deviceInfo
                     negotiatedFeatures = event.features and Feature.REQUESTED
                     sendRaw(RemoteMessages.configure(negotiatedFeatures))
                     if (!configured.isCompleted) configured.complete(event.deviceInfo)
                 }
+                is RemoteMessages.Event.Started -> {
+                    // `RemoteStart` is the TV's own "the remote is ready" signal. Some firmware
+                    // sends it without a usable RemoteConfigure, so it also completes the
+                    // handshake; otherwise the app would wait for a message that never comes.
+                    if (!configured.isCompleted) configured.complete(configuredInfo)
+                }
                 is RemoteMessages.Event.SetActive -> {
                     // Only reply when the TV asks this client to become the active remote.
                     sendRaw(RemoteMessages.setActive(negotiatedFeatures))
+                }
+                is RemoteMessages.Event.TvError -> {
+                    // Reported by the TV when it refuses to talk to this client, most often
+                    // because it no longer recognises the paired certificate.
+                    if (!configured.isCompleted) {
+                        configured.completeExceptionally(
+                            IOException(
+                                "The TV refused the remote connection (${event.message}). " +
+                                    "On the TV, clear the data of Android TV Remote Service and pair again.",
+                            ),
+                        )
+                    }
                 }
                 else -> Unit
             }
@@ -228,12 +260,14 @@ class RemoteSession(
     /** Queues a frame; ordering is preserved by the write mutex. */
     fun sendRaw(payload: ByteArray) {
         if (closed) return
+        val attempt = generation
         scope.launch {
             writeMutex.withLock {
+                if (closed || attempt != generation) return@withLock
                 try {
                     output?.let { writeFrame(it, payload) }
                 } catch (e: IOException) {
-                    close(e.message ?: "Could not write to the TV", notify = true)
+                    if (attempt == generation) close(e.message ?: "Could not write to the TV", notify = true)
                 }
             }
         }
@@ -242,6 +276,7 @@ class RemoteSession(
     fun close(reason: String? = null, notify: Boolean = false) {
         if (!closedOnce.compareAndSet(false, true)) return
         closed = true
+        generation++
         try {
             socket?.close()
         } catch (_: IOException) {
@@ -257,7 +292,7 @@ class RemoteSession(
     companion object {
         private const val TAG = "RemoteSession"
         private const val CONNECT_TIMEOUT_MS = 6000
-        private const val HANDSHAKE_TIMEOUT_MS = 12000L
+        private const val HANDSHAKE_TIMEOUT_MS = 8000L
         private const val REHANDSHAKE_DELAY_MS = 500L
     }
 }

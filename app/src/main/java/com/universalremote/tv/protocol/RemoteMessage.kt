@@ -113,7 +113,7 @@ data class TextFieldInfo(val fieldCounter: Int, val value: String, val focused: 
 object RemoteMessages {
 
     private const val CLIENT_PACKAGE = "com.universalremote.tv"
-    private const val CLIENT_VERSION = "1.0.2"
+    private const val CLIENT_VERSION = "1.0.3"
 
     /** `RemoteConfigure` with this client's feature mask and device information. */
     fun configure(code1: Int = Feature.REQUESTED): ByteArray =

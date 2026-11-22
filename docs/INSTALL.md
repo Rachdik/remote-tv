@@ -6,13 +6,13 @@ Two artifacts are produced:
 
 | File | Use |
 | --- | --- |
-| `dist/UniversalTVRemote-1.0.2-release.apk` | Signed release build. Use this on a phone. |
-| `dist/UniversalTVRemote-1.0.2-debug.apk` | Debug build with `-debug` suffix, installs side by side. |
+| `dist/UniversalTVRemote-1.0.3-release.apk` | Signed release build. Use this on a phone. |
+| `dist/UniversalTVRemote-1.0.3-debug.apk` | Debug build with `-debug` suffix, installs side by side. |
 
 Install over USB:
 
 ```bash
-adb install -r dist/UniversalTVRemote-1.0.2-release.apk
+adb install -r dist/UniversalTVRemote-1.0.3-release.apk
 ```
 
 Or copy the APK to the phone and open it (allow "install unknown apps" for the file manager).
@@ -141,3 +141,10 @@ reconnect after four attempts instead of showing an endless "Connecting…" stat
 Version 1.0.2 always presents the client certificate on the pairing connection (TLS clients can
 otherwise skip it when the TV asks without listing acceptable issuers), logs every pairing frame
 under the `PairingClient` tag, and reports the exact step that stalled.
+
+Version 1.0.3 fixes the control channel: a failed attempt on the first service port used to tear
+down the whole session, so the retry on the second port never sent anything and the app stayed on
+"Connecting…" until every reconnect attempt timed out. Attempts are now isolated, and
+`RemoteStart` (the TV's own ready signal) also completes the handshake on firmware that never sends
+`RemoteConfigure` back. Each control attempt is logged under the `RemoteSession` tag with the TLS
+session, the port and every message the TV sends.
