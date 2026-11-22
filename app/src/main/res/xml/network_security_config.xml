@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The TV transport is a raw TLS socket on the local network, so no HTTP cleartext
+  exemption is needed. Certificate pinning is not used because the Android TV
+  Remote protocol authenticates the peer with the pairing secret instead of a
+  public CA chain; see docs/PROTOCOL.md.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

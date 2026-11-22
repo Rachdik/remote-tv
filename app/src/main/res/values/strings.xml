@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Universal TV Remote</string>
+
+    <!-- Navigation -->
+    <string name="nav_remote">Remote</string>
+    <string name="nav_touchpad">Touchpad</string>
+    <string name="nav_keyboard">Keyboard</string>
+    <string name="nav_voice">Voice</string>
+    <string name="nav_settings">Settings</string>
+    <string name="nav_devices">Devices</string>
+
+    <!-- Devices screen -->
+    <string name="devices_title">Your TVs</string>
+    <string name="devices_subtitle">Paired Android TV and Google TV devices on this network</string>
+    <string name="devices_empty_title">No TV paired yet</string>
+    <string name="devices_empty_body">Scan your Wi-Fi network to find an Android TV, or enter its IP address.</string>
+    <string name="devices_scan">Scan network</string>
+    <string name="devices_scanning">Scanning…</string>
+    <string name="devices_stop_scan">Stop scan</string>
+    <string name="devices_manual">Add by IP address</string>
+    <string name="devices_found">Found on network</string>
+    <string name="devices_paired">Paired devices</string>
+    <string name="devices_none_found">No TV found yet. Make sure the phone and TV are on the same Wi-Fi network.</string>
+    <string name="devices_connect">Connect</string>
+    <string name="devices_pair">Pair</string>
+    <string name="devices_forget">Forget</string>
+    <string name="devices_connected">Connected</string>
+    <string name="devices_offline">Not connected</string>
+    <string name="devices_ip_hint">192.168.1.50</string>
+    <string name="devices_ip_label">TV IP address</string>
+    <string name="devices_add">Add</string>
+    <string name="devices_cancel">Cancel</string>
+    <string name="devices_probe_hint">Ports 6466/6467 are checked automatically.</string>
+
+    <!-- Pairing -->
+    <string name="pairing_title">Pair with your TV</string>
+    <string name="pairing_waiting">Connecting to the TV…</string>
+    <string name="pairing_code_prompt">Enter the 6-character code shown on your TV</string>
+    <string name="pairing_code_hint">Pairing code</string>
+    <string name="pairing_confirm">Pair</string>
+    <string name="pairing_in_progress">Verifying code…</string>
+    <string name="pairing_success">Paired successfully</string>
+    <string name="pairing_failed">Pairing failed</string>
+    <string name="pairing_retry">Try again</string>
+    <string name="pairing_code_hint_tv">On the TV: Settings → Remote &amp; Accessories → Pair remote accessory</string>
+    <string name="pairing_help">The TV shows a code only while the pairing dialog is open. Keep this screen open until it finishes.</string>
+
+    <!-- Remote -->
+    <string name="remote_power">Power</string>
+    <string name="remote_back">Back</string>
+    <string name="remote_home">Home</string>
+    <string name="remote_menu">Menu</string>
+    <string name="remote_ok">OK</string>
+    <string name="remote_volume_up">Volume up</string>
+    <string name="remote_volume_down">Volume down</string>
+    <string name="remote_mute">Mute</string>
+    <string name="remote_play_pause">Play / Pause</string>
+    <string name="remote_play">Play</string>
+    <string name="remote_pause">Pause</string>
+    <string name="remote_stop">Stop</string>
+    <string name="remote_rewind">Rewind</string>
+    <string name="remote_forward">Fast forward</string>
+    <string name="remote_previous">Previous</string>
+    <string name="remote_next">Next</string>
+    <string name="remote_input">Input</string>
+    <string name="remote_settings">TV settings</string>
+    <string name="remote_recent">Recent apps</string>
+    <string name="remote_channel_up">Channel up</string>
+    <string name="remote_channel_down">Channel down</string>
+    <string name="remote_search">Search on TV</string>
+    <string name="remote_voice_assist">Voice assist</string>
+    <string name="remote_volume_unknown">Volume level is reported by the TV only while it changes.</string>
+
+    <!-- Connection -->
+    <string name="conn_connecting">Connecting…</string>
+    <string name="conn_connected">Connected</string>
+    <string name="conn_disconnected">Disconnected</string>
+    <string name="conn_reconnecting">Reconnecting…</string>
+    <string name="conn_error">Connection error</string>
+    <string name="conn_no_device">No TV connected</string>
+    <string name="conn_tap_to_connect">Tap to connect</string>
+    <string name="conn_key_unsupported">This TV rejected key input. On the TV, open Settings → Apps → Show system apps → Android TV Remote Service → Storage → Clear data, then pair again.</string>
+
+    <!-- Touchpad -->
+    <string name="touchpad_title">Touchpad</string>
+    <string name="touchpad_hint">Swipe to navigate · Tap to select · Two-finger swipe to scroll</string>
+    <string name="touchpad_haptics">Haptic feedback</string>
+
+    <!-- Keyboard -->
+    <string name="keyboard_title">Keyboard</string>
+    <string name="keyboard_hint">Text is sent to the field that is focused on the TV.</string>
+    <string name="keyboard_placeholder">Type here…</string>
+    <string name="keyboard_send">Send</string>
+    <string name="keyboard_clear">Clear</string>
+    <string name="keyboard_paste">Paste</string>
+    <string name="keyboard_delete">Backspace</string>
+    <string name="keyboard_enter">Enter</string>
+    <string name="keyboard_space">Space</string>
+    <string name="keyboard_field_focused">A text field is focused on the TV. What you type is inserted there.</string>
+    <string name="keyboard_no_field">Open a search or text field on the TV first, then type here.</string>
+    <string name="keyboard_launch_search">Open TV search</string>
+
+    <!-- Voice -->
+    <string name="voice_title">Voice</string>
+    <string name="voice_hold">Tap the microphone and speak</string>
+    <string name="voice_listening">Listening…</string>
+    <string name="voice_processing">Sending to TV…</string>
+    <string name="voice_native_mode">TV voice input</string>
+    <string name="voice_fallback_mode">Speech recognition fallback</string>
+    <string name="voice_native_explain">Audio is streamed to the TV’s own voice service, so the TV handles the request the same way it handles its physical remote.</string>
+    <string name="voice_fallback_explain">The TV did not offer its native voice channel. Speech is recognised on this phone and the resulting text is sent to the TV as typed text. This is not Google Assistant.</string>
+    <string name="voice_permission_needed">Microphone permission is required for voice input.</string>
+    <string name="voice_grant">Allow microphone</string>
+    <string name="voice_language">Recognition language</string>
+    <string name="voice_unavailable">Speech recognition is not available on this device.</string>
+    <string name="voice_result">Recognised</string>
+    <string name="voice_error">Voice input failed</string>
+    <string name="voice_stop">Stop</string>
+    <string name="voice_not_connected">Connect to a TV first.</string>
+    <string name="voice_privacy">Audio is sent only to your TV over the local network. Nothing is recorded or stored.</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_dynamic_color">Use wallpaper colors (Android 12+)</string>
+    <string name="settings_behaviour">Remote behaviour</string>
+    <string name="settings_haptics">Haptic feedback</string>
+    <string name="settings_auto_reconnect">Reconnect automatically</string>
+    <string name="settings_keep_awake">Keep screen on while remote is open</string>
+    <string name="settings_devices">Devices</string>
+    <string name="settings_manage_devices">Manage paired TVs</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_protocol">Protocol: Android TV Remote v2 (TLS, protobuf)</string>
+    <string name="settings_privacy">Discovery and control happen only on your local network. Pairing credentials never leave the device.</string>
+    <string name="settings_disconnect">Disconnect</string>
+
+    <!-- Generic -->
+    <string name="action_close">Close</string>
+    <string name="action_done">Done</string>
+    <string name="action_ok">OK</string>
+    <string name="action_delete">Delete</string>
+    <string name="unknown_tv">Android TV</string>
+</resources>

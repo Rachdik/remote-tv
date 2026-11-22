@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Remote-control silhouette, drawn inside the 72dp safe zone of the adaptive icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#9DC2FF"
+        android:pathData="M36,22 L72,22 A7,7 0 0 1 79,29 L79,79 A7,7 0 0 1 72,86 L36,86 A7,7 0 0 1 29,79 L29,29 A7,7 0 0 1 36,22 Z" />
+    <path
+        android:fillColor="#0E1116"
+        android:pathData="M54,34 A13,13 0 1 1 53.9,34 Z" />
+    <path
+        android:fillColor="#0E1116"
+        android:pathData="M54,41 A6,6 0 1 1 53.9,41 Z" />
+    <path
+        android:fillColor="#0E1116"
+        android:pathData="M42,62 A4,4 0 1 1 41.9,62 Z" />
+    <path
+        android:fillColor="#0E1116"
+        android:pathData="M54,62 A4,4 0 1 1 53.9,62 Z" />
+    <path
+        android:fillColor="#0E1116"
+        android:pathData="M66,62 A4,4 0 1 1 65.9,62 Z" />
+    <path
+        android:fillColor="#0E1116"
+        android:pathData="M42,73 A4,4 0 1 1 41.9,73 Z" />
+    <path
+        android:fillColor="#57D9C0"
+        android:pathData="M54,73 A4,4 0 1 1 53.9,73 Z" />
+    <path
+        android:fillColor="#0E1116"
+        android:pathData="M66,73 A4,4 0 1 1 65.9,73 Z" />
+</vector>
